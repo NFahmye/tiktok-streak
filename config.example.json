@@ -1,0 +1,14 @@
+{
+  "friends": [
+    "Friend Name 1",
+    "Friend Name 2"
+  ],
+  "messages": [
+    "🔥",
+    "🔥🔥"
+  ],
+  "headless": false,
+  "ntfy_topic": "",
+  "notify_on_success": false,
+  "pc_notification": false
+}

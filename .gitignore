@@ -1,0 +1,11 @@
+# personal data - never commit
+profile/
+config.json
+state.json
+streak.log
+screenshots/
+run.lock
+
+# environment
+.venv/
+__pycache__/
