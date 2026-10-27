@@ -10,6 +10,7 @@ import json
 import msvcrt
 import os
 import random
+import socket
 import subprocess
 import sys
 import time
@@ -29,6 +30,7 @@ HERE = Path(__file__).parent
 PROFILE = HERE / "profile"
 CONFIG = HERE / "config.json"
 STATE = HERE / "state.json"
+ALERTS = HERE / "alerts.json"
 LOG = HERE / "streak.log"
 SHOTS = HERE / "screenshots"
 
@@ -64,9 +66,16 @@ $app = '{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\WindowsPowerShell\v1.0\powershell
 """
 
 
-def notify(title, msg, error=True):
-    """Windows toast on this PC + push to the phone via ntfy.sh. Never raises."""
+def notify(title, msg, error=True, key=None):
+    """Windows toast on this PC + push to the phone via ntfy.sh. Never raises.
+    With a key, the same kind of alert is sent at most once per day (runs retry hourly)."""
     cfg = load_json(CONFIG, {})
+    today = date.today().isoformat()
+    alerts = load_json(ALERTS, {})
+    if key and alerts.get(key) == today:
+        log(f"(alert '{key}' already sent today)")
+        return
+    delivered = False
     if cfg.get("pc_notification", True):
         try:
             subprocess.run(
@@ -74,6 +83,7 @@ def notify(title, msg, error=True):
                 env={**os.environ, "TOAST_TITLE": title, "TOAST_MSG": msg},
                 creationflags=subprocess.CREATE_NO_WINDOW, timeout=30, capture_output=True,
             )
+            delivered = True
         except Exception as e:
             log(f"PC notification failed: {e}")
     topic = cfg.get("ntfy_topic")
@@ -85,8 +95,25 @@ def notify(title, msg, error=True):
                          "Tags": "warning" if error else "fire"},
             )
             urllib.request.urlopen(req, timeout=15)
+            delivered = True
         except Exception as e:
             log(f"Phone notification failed: {e}")
+    if key and delivered:
+        alerts[key] = today
+        ALERTS.write_text(json.dumps(alerts, indent=2), encoding="utf-8")
+
+
+def wait_for_internet(minutes=3):
+    """After waking from sleep, Wi-Fi can take a while to come back."""
+    deadline = time.time() + minutes * 60
+    while True:
+        try:
+            socket.create_connection(("www.tiktok.com", 443), timeout=5).close()
+            return True
+        except OSError:
+            if time.time() > deadline:
+                return False
+            time.sleep(15)
 
 
 def pause(lo=1.5, hi=4.0):
@@ -172,7 +199,8 @@ def main():
     if not friends:
         log("No friends in config.json - nothing to do.")
         if REAL_RUN:
-            notify("TikTok streak: config problem", "config.json has no friends (or isn't valid JSON).")
+            notify("TikTok streak: config problem", "config.json has no friends (or isn't valid JSON).",
+                   key="config")
         return 1
 
     today = date.today().isoformat()
@@ -182,6 +210,12 @@ def main():
         log("Everyone already messaged today.")
         return 0
 
+    # the scheduled task retries every hour, so only alert about connection problems late in the day
+    late = datetime.now().hour >= 21
+    if not wait_for_internet():
+        log("No internet - will retry on the next run.")
+        return 4
+
     failed, sent = [], []
     with sync_playwright() as p:
         ctx = p.chromium.launch_persistent_context(
@@ -190,14 +224,23 @@ def main():
             args=["--disable-gpu"],
         )
         page = ctx.pages[0] if ctx.pages else ctx.new_page()
-        page.goto("https://www.tiktok.com/messages", wait_until="domcontentloaded")
+        try:
+            page.goto("https://www.tiktok.com/messages", wait_until="domcontentloaded", timeout=60000)
+        except PWTimeout:
+            ctx.close()
+            log("TikTok didn't load - will retry on the next run.")
+            if REAL_RUN and late:
+                notify("TikTok streak: not sent yet", f"Couldn't reach TikTok today - {len(todo)} friends "
+                       "still not messaged. Check your internet, or run streak.py.", key="unreachable")
+            return 4
         pause(4, 7)
 
         if "login" in page.url:
             log("Not logged in - run login.py first.")
             ctx.close()
             if REAL_RUN:
-                notify("TikTok streak: logged out", "TikTok login expired. Run login.py on your PC, then streak.py.")
+                notify("TikTok streak: logged out", "TikTok login expired. Run login.py on your PC, then streak.py.",
+                       key="logged_out")
             return 2
 
         random.shuffle(todo)
@@ -234,7 +277,8 @@ def main():
         notify(
             f"TikTok streak: {len(failed)} failed",
             f"Not sent to: {', '.join(failed)}. Sent {len(sent)}/{len(todo)}. "
-            "Check streak.log and screenshots, or run streak.py again.",
+            "It retries every hour. Check streak.log and screenshots if this keeps happening.",
+            key="failed",
         )
     elif REAL_RUN and cfg.get("notify_on_success"):
         notify("TikTok streak done", f"Sent to all {len(sent)} friends.", error=False)
@@ -254,5 +298,5 @@ if __name__ == "__main__":
     except Exception as e:
         log("CRASHED:\n" + traceback.format_exc())
         if REAL_RUN:
-            notify("TikTok streak crashed", f"{type(e).__name__}: {str(e)[:200]} - see streak.log")
+            notify("TikTok streak crashed", f"{type(e).__name__}: {str(e)[:200]} - see streak.log", key="crashed")
         sys.exit(3)

@@ -5,7 +5,7 @@ Keeps your TikTok DM streaks alive by sending a short message (like 🔥) to the
 - Sends **one message per friend per day** at the time you choose (default: midnight)
 - Picks a random message from your list, types it like a person, and opens chats in random order
 - Opens the correct chat by checking the chat header before typing, so it can't message the wrong person
-- **Catches up** if your laptop was off or asleep: it runs as soon as you open the laptop
+- **Catches up** if your laptop was off, asleep or offline: it retries every hour and runs as soon as you log in or unlock
 - Sends an **alert to your phone** if something goes wrong (free ntfy app, no account needed)
 
 > ⚠️ **Read before using**
@@ -88,8 +88,11 @@ Everything is installed into `C:\Users\<you>\tiktok-streak`.
 
 You get a push notification when:
 - a friend couldn't be messaged (it tells you who),
-- your TikTok login expired, or
+- your TikTok login expired,
+- it's after 9 PM and TikTok still couldn't be reached that day, or
 - the bot crashed or `config.json` is broken.
+
+Each kind of alert is sent **at most once per day**, so the hourly retries don't spam you.
 
 To set it up:
 1. Install **ntfy** on your phone ([iPhone](https://apps.apple.com/app/ntfy/id1625396347) / [Android](https://play.google.com/store/apps/details?id=io.heckel.ntfy)).
@@ -119,7 +122,7 @@ Each friend shows `found` or `FAILED`. A failed name usually has a small spellin
 ```powershell
 cd $env:USERPROFILE\tiktok-streak; .\setup_task.ps1 -Time 21:30
 ```
-Use 24-hour time. The bot runs at that time plus a random 0–30 minutes, so it isn't the exact same second every day.
+Use 24-hour time. The bot runs at that time plus a random 0–30 minutes, so it isn't the exact same second every day. After that it retries **every hour** and **whenever you log in or unlock** the PC. Once everyone has been messaged, those retries exit straight away without opening a browser.
 
 > If PowerShell says *"running scripts is disabled"*, use:
 > `powershell -ExecutionPolicy Bypass -File .\setup_task.ps1 -Time 21:30`
@@ -128,8 +131,9 @@ Use 24-hour time. The bot runs at that time plus a random 0–30 minutes, so it 
 
 | Your laptop at that time | Result |
 |---|---|
-| On or locked | Runs on time |
-| Asleep / shut down | Runs **as soon as you open the laptop and log in** that day |
+| On, with internet | Runs on time |
+| On, but no internet | Waits up to 3 minutes for internet, then tries again next hour |
+| Asleep / shut down | Runs **as soon as you open the laptop and log in or unlock** |
 | Not opened all day | Doesn't run, so the streak can break |
 
 ## 7. Useful commands

@@ -2,6 +2,7 @@
 profile/
 config.json
 state.json
+alerts.json
 streak.log
 screenshots/
 run.lock
